@@ -35,16 +35,25 @@ if pdf_file and aux_file:
         # --- Desbloquear PDF
         reader = PdfReader(pdf_path_original)
         if reader.is_encrypted:
-            password = "900690303"  # Contraseña fija
-            if reader.decrypt(password):
-                writer = PdfWriter()
-                for page in reader.pages:
-                    writer.add_page(page)
-                with open(pdf_path_unlocked, "wb") as f:
-                    writer.write(f)
-                st.success("PDF desbloqueado correctamente.")
+            st.warning("El PDF está protegido con contraseña.")
+            password_input = st.text_input("🔑 Ingresa la contraseña del PDF:", type="password")
+            if password_input:
+                try:
+                    result = reader.decrypt(password_input)
+                    if result == 0:
+                        st.error("❌ Contraseña incorrecta.")
+                        st.stop()
+                    else:
+                        writer = PdfWriter()
+                        for page in reader.pages:
+                            writer.add_page(page)
+                        with open(pdf_path_unlocked, "wb") as f:
+                            writer.write(f)
+                        st.success("PDF desbloqueado correctamente.")
+                except Exception as e:
+                    st.error(f"Error al desbloquear el PDF: {e}")
+                    st.stop()
             else:
-                st.error("❌ Contraseña incorrecta.")
                 st.stop()
         else:
             pdf_path_unlocked = pdf_path_original
@@ -94,11 +103,26 @@ if pdf_file and aux_file:
             if all(c is None for c in fila):
                 continue
             tabla.append(list(fila))
+
         df_aux = pd.DataFrame(tabla[1:], columns=tabla[0])
-        for col in ["Debitos", "Creditos", "Saldo"]:
-            if col in df_aux.columns:
+        df_aux.columns = [str(c).strip().lower() for c in df_aux.columns]
+
+        # Detectar columnas relevantes
+        col_debito = next((c for c in df_aux.columns if "deb" in c), None)
+        col_credito = next((c for c in df_aux.columns if "cred" in c), None)
+        col_saldo = next((c for c in df_aux.columns if "saldo" in c), None)
+
+        for col in [col_debito, col_credito, col_saldo]:
+            if col:
                 df_aux[col] = pd.to_numeric(df_aux[col], errors="coerce").fillna(0)
-        df_aux["SALDOS_POSITIVOS"] = df_aux["Debitos"].abs() + df_aux["Creditos"].abs()
+
+        if col_debito and col_credito:
+            df_aux["saldos_positivos"] = df_aux[col_debito].abs() + df_aux[col_credito].abs()
+        elif col_saldo:
+            df_aux["saldos_positivos"] = df_aux[col_saldo].abs()
+        else:
+            st.error("No se encontraron columnas de Débito, Crédito o Saldo en el auxiliar.")
+            st.stop()
 
         # --- Cruce de datos
         df_extracto["FECHA_AUX"] = None
@@ -118,12 +142,12 @@ if pdf_file and aux_file:
 
         for i, valor in enumerate(df_extracto["VALOR"]):
             descripcion_extracto = str(df_extracto.at[i, "DESCRIPCIÓN"]).upper()
-            exacto = df_aux_temp[df_aux_temp["SALDOS_POSITIVOS"] == abs(valor)]
+            exacto = df_aux_temp[df_aux_temp["saldos_positivos"] == abs(valor)]
             if not exacto.empty:
                 fila = exacto.iloc[0]
-                df_extracto.at[i, "FECHA_AUX"] = fila.get("Fecha")
-                df_extracto.at[i, "DESCRIPCION_AUX"] = fila.get("Nota")
-                df_extracto.at[i, "DOCNUM_AUX"] = fila.get("Doc Num")
+                df_extracto.at[i, "FECHA_AUX"] = fila.get("fecha")
+                df_extracto.at[i, "DESCRIPCION_AUX"] = fila.get("nota")
+                df_extracto.at[i, "DOCNUM_AUX"] = fila.get("doc num")
                 df_extracto.at[i, "TIPO_COINCIDENCIA"] = "COINCIDENCIA EXACTA"
                 df_aux_temp = df_aux_temp.drop(fila.name)
             else:
