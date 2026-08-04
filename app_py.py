@@ -1,14 +1,13 @@
 import streamlit as st
 import pandas as pd
-import tabula
+import pdfplumber
 from PyPDF2 import PdfReader, PdfWriter
 from openpyxl import load_workbook
 import tempfile
 import os
+import re
 
-st.title("Conciliador Bancario – DISTRINORTE")
-
-st.write("Sube el PDF del banco y el AUXILIAR para generar la conciliación.")
+st.title("Conciliador Bancario – DISTRINORTE (Versión Cloud)")
 
 pdf_file = st.file_uploader("PDF del banco", type=["pdf"])
 aux_file = st.file_uploader("AUXILIAR.xlsx", type=["xlsx"])
@@ -16,16 +15,15 @@ aux_file = st.file_uploader("AUXILIAR.xlsx", type=["xlsx"])
 if pdf_file and aux_file:
     st.write("Procesando archivos...")
 
-    # Crear archivos temporales
     with tempfile.TemporaryDirectory() as tmpdir:
-        pdf_path_original = os.path.join(tmpdir, "BANCOLOMBIA.pdf")
-        pdf_path_unlocked = os.path.join(tmpdir, "BANCOLOMBIA_DESBLOQUEADO.pdf")
+        pdf_path_original = os.path.join(tmpdir, "BANCO.pdf")
+        pdf_path_unlocked = os.path.join(tmpdir, "BANCO_UNLOCKED.pdf")
         ruta_aux = os.path.join(tmpdir, "AUXILIAR.xlsx")
         ruta_aux2 = os.path.join(tmpdir, "AUXILIAR2.xlsx")
         ruta_final = os.path.join(tmpdir, "CONCILIADO.xlsx")
         excel_extracto = os.path.join(tmpdir, "EXTRACTO.xlsx")
 
-        # Guardar archivos subidos
+        # Guardar archivos
         with open(pdf_path_original, "wb") as f:
             f.write(pdf_file.read())
 
@@ -33,27 +31,25 @@ if pdf_file and aux_file:
             f.write(aux_file.read())
 
         # ============================================================
-        # 🔓 MANEJO DE PDF CON O SIN CONTRASEÑA
+        # 🔓 DESBLOQUEO PDF
         # ============================================================
 
         reader = PdfReader(pdf_path_original)
 
         if reader.is_encrypted:
             st.warning("El PDF está protegido con contraseña.")
-
-            password_input = st.text_input("Ingresa la contraseña del PDF", type="password")
+            password_input = st.text_input("Ingresa la contraseña", type="password")
 
             if password_input:
                 try:
                     reader.decrypt(password_input)
-                    st.success("PDF desbloqueado correctamente.")
+                    st.success("PDF desbloqueado.")
                 except:
-                    st.error("❌ Contraseña incorrecta. Intenta nuevamente.")
+                    st.error("❌ Contraseña incorrecta.")
                     st.stop()
         else:
-            st.info("El PDF no tiene contraseña. Continuando...")
+            st.info("El PDF no tiene contraseña.")
 
-        # Guardar PDF desbloqueado
         writer = PdfWriter()
         for page in reader.pages:
             writer.add_page(page)
@@ -62,70 +58,51 @@ if pdf_file and aux_file:
             writer.write(f)
 
         # ============================================================
-        # 1️⃣ EXTRACCIÓN Y TRATAMIENTO DEL PDF → EXTRACTO.xlsx
+        # 1️⃣ EXTRACCIÓN PDF SIN TABULA (pdfplumber)
         # ============================================================
 
-        tablas = tabula.read_pdf(pdf_path_unlocked, pages='all', multiple_tables=True, stream=True)
-        if not tablas:
-            tablas = tabula.read_pdf(pdf_path_unlocked, pages='all', multiple_tables=True, lattice=True)
+        filas = []
 
-        df_final = pd.concat(tablas, ignore_index=True)
+        with pdfplumber.open(pdf_path_unlocked) as pdf:
+            for page in pdf.pages:
+                texto = page.extract_text()
+                if not texto:
+                    continue
 
-        df_hoja1 = df_final.iloc[:38].reset_index(drop=True)
-        df_hoja2 = df_final.iloc[38:].reset_index(drop=True)
+                lineas = texto.split("\n")
 
-        columnas_a_eliminar = [i for i in range(7) if i < len(df_hoja2.columns)]
-        df_hoja2.drop(df_hoja2.columns[columnas_a_eliminar], axis=1, inplace=True)
+                for linea in lineas:
+                    # Detectar filas con estructura típica del extracto
+                    # FECHA DESCRIPCIÓN SUCURSAL DCTO VALOR SALDO
+                    patron = r"(\d{2}[./-]\d{2})\s+(.*?)\s+(\d+)\s+(\d+)\s+([0-9,.-]+)\s+([0-9,.-]+)"
+                    m = re.match(patron, linea)
 
-        df_hoja3 = df_hoja1.iloc[5:].reset_index(drop=True)
+                    if m:
+                        filas.append([
+                            m.group(1),
+                            m.group(2),
+                            m.group(3),
+                            m.group(4),
+                            m.group(5),
+                            m.group(6)
+                        ])
 
-        fechas = df_hoja3.iloc[:, 0].astype(str).str.split(' ', n=1, expand=True)
-        df_hoja3['A'] = fechas[0]
-        df_hoja3['B'] = fechas[1]
-        df_hoja3.drop(df_hoja3.columns[0], axis=1, inplace=True)
+        df_extracto = pd.DataFrame(filas, columns=["FECHA", "DESCRIPCIÓN", "SUCURSAL", "DCTO.", "VALOR", "SALDO"])
 
-        df_hoja3 = df_hoja3[['A', 'B'] + [col for col in df_hoja3.columns if col not in ['A', 'B']]]
-
-        columnas_a_borrar = []
-        if len(df_hoja3.columns) > 2:
-            columnas_a_borrar.append(df_hoja3.columns[2])
-        if len(df_hoja3.columns) > 6:
-            columnas_a_borrar.append(df_hoja3.columns[6])
-        df_hoja3.drop(columns=columnas_a_borrar, inplace=True)
-
-        df_hoja3 = df_hoja3.iloc[:, :6]
-        df_hoja3.columns = ['FECHA', 'DESCRIPCIÓN', 'SUCURSAL', 'DCTO.', 'VALOR', 'SALDO']
-
-        df_hoja2_copy = df_hoja2.iloc[:, :6].reset_index(drop=True)
-        df_hoja2_copy.columns = ['FECHA', 'DESCRIPCIÓN', 'SUCURSAL', 'DCTO.', 'VALOR', 'SALDO']
-        df_extracto = pd.concat([df_hoja3, df_hoja2_copy], ignore_index=True)
-
-        df_extracto = df_extracto[df_extracto['DESCRIPCIÓN'] != 'FIN ESTADO DE CUENTA'].reset_index(drop=True)
-
-        def formatear_fecha(valor):
-            try:
-                partes = str(valor).replace('.', '/').split('/')
-                if len(partes) >= 2:
-                    return f"{partes[0].zfill(2)}/{partes[1].zfill(2)}/2026"
-                return valor
-            except:
-                return valor
-
-        df_extracto['FECHA'] = df_extracto['FECHA'].apply(formatear_fecha)
-
-        df_extracto['VALOR'] = (
-            df_extracto['VALOR'].astype(str)
-            .str.replace(',', '', regex=False)
-            .str.replace(' ', '', regex=False)
+        # Limpieza
+        df_extracto["VALOR"] = (
+            df_extracto["VALOR"].astype(str)
+            .str.replace(",", "", regex=False)
+            .str.replace(" ", "", regex=False)
         )
 
-        df_extracto['VALOR'] = pd.to_numeric(df_extracto['VALOR'], errors='coerce').fillna(0)
-        df_extracto['SALDOS_POSITIVOS'] = df_extracto['VALOR'].abs()
+        df_extracto["VALOR"] = pd.to_numeric(df_extracto["VALOR"], errors="coerce").fillna(0)
+        df_extracto["SALDOS_POSITIVOS"] = df_extracto["VALOR"].abs()
 
         df_extracto.to_excel(excel_extracto, index=False)
 
         # ============================================================
-        # 2️⃣ TRATAMIENTO DEL AUXILIAR → AUXILIAR2.xlsx
+        # 2️⃣ TRATAMIENTO AUXILIAR
         # ============================================================
 
         wb = load_workbook(ruta_aux)
@@ -169,7 +146,7 @@ if pdf_file and aux_file:
         wb2.save(ruta_aux2)
 
         # ============================================================
-        # 3️⃣ CRUCE FINAL ENTRE EXTRACTO Y AUXILIAR2 → CONCILIADO.xlsx
+        # 3️⃣ CRUCE FINAL
         # ============================================================
 
         df_extracto = pd.read_excel(excel_extracto)
