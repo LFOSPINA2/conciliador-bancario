@@ -110,9 +110,8 @@ if pdf_file and aux_file:
             if any(str(c).lower().strip() in ["debito", "debitos", "crédito", "creditos", "saldo"] for c in fila):
                 encabezado_idx = i
                 break
-
         if encabezado_idx is None:
-            encabezado_idx = 0  # fallback
+            encabezado_idx = 0
 
         df_aux = pd.DataFrame(tabla[encabezado_idx + 1:], columns=tabla[encabezado_idx])
         df_aux.columns = [str(c).strip().lower() for c in df_aux.columns]
@@ -142,7 +141,9 @@ if pdf_file and aux_file:
 
         st.success("Columnas detectadas y base auxiliar limpiada correctamente.")
 
-        # --- Cruce de datos
+        # --- Cruce de datos optimizado y con seguimiento visual
+        st.info("Iniciando cruce de datos entre extracto y auxiliar...")
+
         df_extracto["FECHA_AUX"] = None
         df_extracto["DESCRIPCION_AUX"] = None
         df_extracto["DOCNUM_AUX"] = None
@@ -158,9 +159,13 @@ if pdf_file and aux_file:
             "SERVICIO PAGO DE NOMINA"
         ]
 
+        progress_bar = st.progress(0)
+        total = len(df_extracto)
+
         for i, valor in enumerate(df_extracto["VALOR"]):
             descripcion_extracto = str(df_extracto.at[i, "DESCRIPCIÓN"]).upper()
             exacto = df_aux_temp[df_aux_temp["saldos_positivos"] == abs(valor)]
+
             if not exacto.empty:
                 fila = exacto.iloc[0]
                 df_extracto.at[i, "FECHA_AUX"] = fila.get("fecha")
@@ -175,3 +180,8 @@ if pdf_file and aux_file:
                 if concepto in descripcion_extracto:
                     df_extracto.at[i, "DESCRIPCION_AUX"] = "GASTOS BANCARIOS"
                     df_extracto.at[i, "TIPO_COINCIDENCIA"] = "GASTOS BANCARIOS"
+                    break
+
+            progress_bar.progress((i + 1) / total)
+
+        st.success
