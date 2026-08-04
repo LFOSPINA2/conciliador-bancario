@@ -138,7 +138,7 @@ if pdf_file and aux_file:
 
         st.success("Columnas detectadas y base auxiliar limpiada correctamente.")
 
-        # --- Cruce con barra de progreso
+        # --- Cruce corregido con tolerancia
         st.info("Iniciando cruce de datos entre extracto y auxiliar...")
 
         df_extracto["FECHA_AUX"] = None
@@ -147,13 +147,19 @@ if pdf_file and aux_file:
         df_extracto["TIPO_COINCIDENCIA"] = None
         df_aux_temp = df_aux.copy()
 
+        # Lista ampliada de gastos bancarios
         conceptos_bancarios = [
             "COBRO IVA PAGOS AUTOMATICOS",
+            "CUOTA PLAN",
             "CUOTA PLAN CANAL NEGOCIOS",
-            "IMPTO GOBIERNO 4X1000",
+            "IVA CUOTA PLAN",
             "IVA CUOTA PLAN CANAL NEGOCIOS",
+            "IMPTO GOBIERNO 4X1000",
             "SERVICIO PAGO A PROVEEDORES",
-            "SERVICIO PAGO DE NOMINA"
+            "SERVICIO PAGO DE NOMINA",
+            "COMISION",
+            "COMISIONES",
+            "GASTOS BANCARIOS"
         ]
 
         progress_bar = st.progress(0)
@@ -161,18 +167,40 @@ if pdf_file and aux_file:
 
         for i, valor in enumerate(df_extracto["VALOR"]):
             descripcion_extracto = str(df_extracto.at[i, "DESCRIPCIÓN"]).upper()
+
+            # Coincidencia exacta
             exacto = df_aux_temp[df_aux_temp["saldos_positivos"] == abs(valor)]
+
+            # Coincidencia por tolerancia ±1 peso
+            tolerancia = df_aux_temp[(df_aux_temp["saldos_positivos"] >= abs(valor) - 1) &
+                                     (df_aux_temp["saldos_positivos"] <= abs(valor) + 1)]
+
+            # Coincidencia por diferencia mínima flotante
+            dif_min = df_aux_temp[abs(df_aux_temp["saldos_positivos"] - abs(valor)) < 0.01]
+
+            fila = None
+            tipo = None
 
             if not exacto.empty:
                 fila = exacto.iloc[0]
+                tipo = "COINCIDENCIA EXACTA"
+            elif not tolerancia.empty:
+                fila = tolerancia.iloc[0]
+                tipo = "TOLERANCIA ±1"
+            elif not dif_min.empty:
+                fila = dif_min.iloc[0]
+                tipo = "REDONDEO"
+
+            if fila is not None:
                 df_extracto.at[i, "FECHA_AUX"] = fila.get("fecha")
                 df_extracto.at[i, "DESCRIPCION_AUX"] = fila.get("nota")
                 df_extracto.at[i, "DOCNUM_AUX"] = fila.get("doc num")
-                df_extracto.at[i, "TIPO_COINCIDENCIA"] = "COINCIDENCIA EXACTA"
+                df_extracto.at[i, "TIPO_COINCIDENCIA"] = tipo
                 df_aux_temp = df_aux_temp.drop(fila.name)
             else:
                 df_extracto.at[i, "TIPO_COINCIDENCIA"] = "NO EXISTE"
 
+            # Clasificación de gastos bancarios
             for concepto in conceptos_bancarios:
                 if concepto in descripcion_extracto:
                     df_extracto.at[i, "DESCRIPCION_AUX"] = "GASTOS BANCARIOS"
