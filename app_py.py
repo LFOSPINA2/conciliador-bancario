@@ -95,7 +95,7 @@ if pdf_file and aux_file:
         df_extracto["SALDO"] = df_extracto["SALDO"].str.replace(",", "").astype(float)
         df_extracto.to_excel(ruta_extracto, index=False)
 
-        # --- Limpieza y procesamiento del auxiliar contable
+        # --- Limpieza avanzada del auxiliar contable
         wb = load_workbook(ruta_aux)
         ws = wb.active
         tabla = []
@@ -104,7 +104,17 @@ if pdf_file and aux_file:
                 continue
             tabla.append(list(fila))
 
-        df_aux = pd.DataFrame(tabla[1:], columns=tabla[0])
+        # Detectar fila con encabezados reales
+        encabezado_idx = None
+        for i, fila in enumerate(tabla):
+            if any(str(c).lower().strip() in ["debito", "debitos", "crédito", "creditos", "saldo"] for c in fila):
+                encabezado_idx = i
+                break
+
+        if encabezado_idx is None:
+            encabezado_idx = 0  # fallback
+
+        df_aux = pd.DataFrame(tabla[encabezado_idx + 1:], columns=tabla[encabezado_idx])
         df_aux.columns = [str(c).strip().lower() for c in df_aux.columns]
 
         # Eliminar filas vacías o encabezados repetidos
@@ -165,17 +175,3 @@ if pdf_file and aux_file:
                 if concepto in descripcion_extracto:
                     df_extracto.at[i, "DESCRIPCION_AUX"] = "GASTOS BANCARIOS"
                     df_extracto.at[i, "TIPO_COINCIDENCIA"] = "GASTOS BANCARIOS"
-                    break
-
-        df_extracto.to_excel(ruta_final, index=False)
-        st.success("✅ Archivo CONCILIADO.xlsx generado correctamente.")
-
-        with open(ruta_final, "rb") as f:
-            conciliado_bytes = f.read()
-
-        st.download_button(
-            label="⬇️ Descargar archivo conciliado",
-            data=conciliado_bytes,
-            file_name="CONCILIADO.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
