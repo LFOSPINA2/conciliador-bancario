@@ -107,22 +107,26 @@ if pdf_file and aux_file:
         df_aux = pd.DataFrame(tabla[1:], columns=tabla[0])
         df_aux.columns = [str(c).strip().lower() for c in df_aux.columns]
 
-        # Detectar columnas relevantes
-        col_debito = next((c for c in df_aux.columns if "deb" in c), None)
-        col_credito = next((c for c in df_aux.columns if "cred" in c), None)
-        col_saldo = next((c for c in df_aux.columns if "saldo" in c), None)
+        # Buscar posibles nombres de columnas (más flexibles)
+        col_debito = next((c for c in df_aux.columns if any(x in c for x in ["deb", "debe", "cargo"])), None)
+        col_credito = next((c for c in df_aux.columns if any(x in c for x in ["cred", "haber", "abono"])), None)
+        col_saldo = next((c for c in df_aux.columns if any(x in c for x in ["saldo", "balance", "importe", "valor"])), None)
 
+        # Convertir a numérico si existen
         for col in [col_debito, col_credito, col_saldo]:
             if col:
                 df_aux[col] = pd.to_numeric(df_aux[col], errors="coerce").fillna(0)
 
+        # Calcular saldos positivos
         if col_debito and col_credito:
             df_aux["saldos_positivos"] = df_aux[col_debito].abs() + df_aux[col_credito].abs()
         elif col_saldo:
             df_aux["saldos_positivos"] = df_aux[col_saldo].abs()
         else:
-            st.error("No se encontraron columnas de Débito, Crédito o Saldo en el auxiliar.")
+            st.error("No se encontraron columnas de Débito, Crédito o Saldo (ni equivalentes) en el auxiliar.")
             st.stop()
+
+        st.success("Columnas detectadas correctamente en el auxiliar.")
 
         # --- Cruce de datos
         df_extracto["FECHA_AUX"] = None
