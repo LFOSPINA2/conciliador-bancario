@@ -70,12 +70,12 @@ if pdf_file and aux_file:
                 lineas = texto.split("\n")
 
                 patron = (
-                    r"(\d{1,2}/\d{1,2})\s+"                # FECHA
-                    r"(.*?)\s+"                            # DESCRIPCIÓN
-                    r"(?:(CANAL\s+\w+|CENTRO\s+\w+|AGUAZUL|PUERTO\s+\w+)\s+)?"  # SUCURSAL opcional
-                    r"(?:(\d{1,6})\s+)?"                   # DCTO. opcional
-                    r"(-?\d{1,3}(?:,\d{3})*\.\d{2})\s+"    # VALOR
-                    r"(-?\d{1,3}(?:,\d{3})*\.\d{2})"       # SALDO
+                    r"(\d{1,2}/\d{1,2})\s+"                
+                    r"(.*?)\s+"                            
+                    r"(?:(CANAL\s+\w+|CENTRO\s+\w+|AGUAZUL|PUERTO\s+\w+)\s+)?"  
+                    r"(?:(\d{1,6})\s+)?"                   
+                    r"(-?\d{1,3}(?:,\d{3})*\.\d{2})\s+"    
+                    r"(-?\d{1,3}(?:,\d{3})*\.\d{2})"       
                 )
 
                 for linea in lineas:
@@ -104,44 +104,41 @@ if pdf_file and aux_file:
                 continue
             tabla.append(list(fila))
 
-        # Detectar fila con encabezados reales
         encabezado_idx = None
         for i, fila in enumerate(tabla):
-            if any(str(c).lower().strip() in ["debito", "debitos", "crédito", "creditos", "saldo"] for c in fila):
+            fila_lower = [str(c).lower().strip() for c in fila]
+            if any(x in fila_lower for x in ["debito", "debitos", "crédito", "creditos", "saldo"]):
                 encabezado_idx = i
                 break
+
         if encabezado_idx is None:
             encabezado_idx = 0
 
         df_aux = pd.DataFrame(tabla[encabezado_idx + 1:], columns=tabla[encabezado_idx])
-        df_aux.columns = [str(c).strip().lower() for c in df_aux.columns]
+        df_aux.columns = [str(c).lower().strip() for c in df_aux.columns]
 
-        # Eliminar filas vacías o encabezados repetidos
         df_aux = df_aux.dropna(how="all")
         df_aux = df_aux[df_aux.apply(lambda x: any(pd.notna(x)), axis=1)]
 
-        # Buscar posibles nombres de columnas (más flexibles)
         col_debito = next((c for c in df_aux.columns if any(x in c for x in ["deb", "debe", "cargo"])), None)
         col_credito = next((c for c in df_aux.columns if any(x in c for x in ["cred", "haber", "abono"])), None)
         col_saldo = next((c for c in df_aux.columns if any(x in c for x in ["saldo", "balance", "importe", "valor"])), None)
 
-        # Convertir a numérico si existen
         for col in [col_debito, col_credito, col_saldo]:
             if col:
                 df_aux[col] = pd.to_numeric(df_aux[col], errors="coerce").fillna(0)
 
-        # Calcular saldos positivos
         if col_debito and col_credito:
             df_aux["saldos_positivos"] = df_aux[col_debito].abs() + df_aux[col_credito].abs()
         elif col_saldo:
             df_aux["saldos_positivos"] = df_aux[col_saldo].abs()
         else:
-            st.error("No se encontraron columnas de Débito, Crédito o Saldo (ni equivalentes) en el auxiliar.")
+            st.error("No se encontraron columnas de Débito, Crédito o Saldo.")
             st.stop()
 
         st.success("Columnas detectadas y base auxiliar limpiada correctamente.")
 
-        # --- Cruce de datos optimizado y con seguimiento visual
+        # --- Cruce con barra de progreso
         st.info("Iniciando cruce de datos entre extracto y auxiliar...")
 
         df_extracto["FECHA_AUX"] = None
@@ -184,4 +181,17 @@ if pdf_file and aux_file:
 
             progress_bar.progress((i + 1) / total)
 
-        st.success
+        st.success("Cruce de datos completado correctamente.")
+
+        # --- Generar archivo final
+        df_extracto.to_excel(ruta_final, index=False)
+
+        with open(ruta_final, "rb") as f:
+            conciliado_bytes = f.read()
+
+        st.download_button(
+            label="⬇️ Descargar archivo conciliado",
+            data=conciliado_bytes,
+            file_name="CONCILIADO.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
