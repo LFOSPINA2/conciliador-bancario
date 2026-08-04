@@ -95,7 +95,7 @@ if pdf_file and aux_file:
         df_extracto["SALDO"] = df_extracto["SALDO"].str.replace(",", "").astype(float)
         df_extracto.to_excel(ruta_extracto, index=False)
 
-        # --- Procesar auxiliar contable
+        # --- Limpieza y procesamiento del auxiliar contable
         wb = load_workbook(ruta_aux)
         ws = wb.active
         tabla = []
@@ -106,6 +106,10 @@ if pdf_file and aux_file:
 
         df_aux = pd.DataFrame(tabla[1:], columns=tabla[0])
         df_aux.columns = [str(c).strip().lower() for c in df_aux.columns]
+
+        # Eliminar filas vacías o encabezados repetidos
+        df_aux = df_aux.dropna(how="all")
+        df_aux = df_aux[df_aux.apply(lambda x: any(pd.notna(x)), axis=1)]
 
         # Buscar posibles nombres de columnas (más flexibles)
         col_debito = next((c for c in df_aux.columns if any(x in c for x in ["deb", "debe", "cargo"])), None)
@@ -126,7 +130,7 @@ if pdf_file and aux_file:
             st.error("No se encontraron columnas de Débito, Crédito o Saldo (ni equivalentes) en el auxiliar.")
             st.stop()
 
-        st.success("Columnas detectadas correctamente en el auxiliar.")
+        st.success("Columnas detectadas y base auxiliar limpiada correctamente.")
 
         # --- Cruce de datos
         df_extracto["FECHA_AUX"] = None
