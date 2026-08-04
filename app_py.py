@@ -7,7 +7,7 @@ import tempfile
 import os
 import re
 
-st.title("Conciliador Bancario – DISTRINORTE (Versión Cloud)")
+st.title("Conciliador Bancario (Versión Cloud)")
 
 pdf_file = st.file_uploader("PDF del banco", type=["pdf"])
 aux_file = st.file_uploader("AUXILIAR.xlsx", type=["xlsx"])
