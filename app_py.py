@@ -138,7 +138,7 @@ if pdf_file and aux_file:
 
         st.success("Columnas detectadas y base auxiliar limpiada correctamente.")
 
-        # --- Cruce corregido con tolerancia
+        # --- Cruce corregido con tolerancia progresiva ±100
         st.info("Iniciando cruce de datos entre extracto y auxiliar...")
 
         df_extracto["FECHA_AUX"] = None
@@ -167,30 +167,37 @@ if pdf_file and aux_file:
 
         for i, valor in enumerate(df_extracto["VALOR"]):
             descripcion_extracto = str(df_extracto.at[i, "DESCRIPCIÓN"]).upper()
-
-            # Coincidencia exacta
-            exacto = df_aux_temp[df_aux_temp["saldos_positivos"] == abs(valor)]
-
-            # Coincidencia por tolerancia ±1 peso
-            tolerancia = df_aux_temp[(df_aux_temp["saldos_positivos"] >= abs(valor) - 1) &
-                                     (df_aux_temp["saldos_positivos"] <= abs(valor) + 1)]
-
-            # Coincidencia por diferencia mínima flotante
-            dif_min = df_aux_temp[abs(df_aux_temp["saldos_positivos"] - abs(valor)) < 0.01]
+            valor_abs = abs(valor)
 
             fila = None
             tipo = None
 
+            # 1. Coincidencia exacta
+            exacto = df_aux_temp[df_aux_temp["saldos_positivos"] == valor_abs]
             if not exacto.empty:
                 fila = exacto.iloc[0]
                 tipo = "COINCIDENCIA EXACTA"
-            elif not tolerancia.empty:
-                fila = tolerancia.iloc[0]
-                tipo = "TOLERANCIA ±1"
-            elif not dif_min.empty:
-                fila = dif_min.iloc[0]
-                tipo = "REDONDEO"
 
+            # 2. Coincidencia por tolerancia progresiva ±1 a ±100
+            if fila is None:
+                for tol in range(1, 101):
+                    rango = df_aux_temp[
+                        (df_aux_temp["saldos_positivos"] >= valor_abs - tol) &
+                        (df_aux_temp["saldos_positivos"] <= valor_abs + tol)
+                    ]
+                    if not rango.empty:
+                        fila = rango.iloc[0]
+                        tipo = f"TOLERANCIA ±{tol}"
+                        break
+
+            # 3. Coincidencia por diferencia flotante mínima
+            if fila is None:
+                dif_min = df_aux_temp[abs(df_aux_temp["saldos_positivos"] - valor_abs) < 0.01]
+                if not dif_min.empty:
+                    fila = dif_min.iloc[0]
+                    tipo = "REDONDEO"
+
+            # Si encontró coincidencia → asignar y excluir
             if fila is not None:
                 df_extracto.at[i, "FECHA_AUX"] = fila.get("fecha")
                 df_extracto.at[i, "DESCRIPCION_AUX"] = fila.get("nota")
